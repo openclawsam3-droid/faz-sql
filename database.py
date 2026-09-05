@@ -252,7 +252,7 @@ def init_db():
 
 
 def ensure_columns(conn, table, columns):
-    cols = {r[1].lower() for r in conn.execute(
+    cols = {r["column_name"].lower() for r in conn.execute(
         "SELECT column_name FROM information_schema.columns WHERE table_name=%s",
         (table.lower(),),
     ).fetchall()}
