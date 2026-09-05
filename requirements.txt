@@ -1,0 +1,18 @@
+# فذ العقارية — متطلبات التشغيل (requirements.txt)
+# شغّل: pip install -r requirements.txt
+
+# أساسي للتشغيل
+requests>=2.31
+python-dotenv>=1.0
+streamlit>=1.30
+pandas>=2.0
+openpyxl>=3.1          # تصدير Excel من لوحة Streamlit
+python-telegram-bot>=20.0
+telethon>=1.29         # سحب الرسائل من القناة
+hijri-converter>=2.3   # تحويل هجري→ميلادي عند الحاجة
+
+# قاعدة بيانات Supabase (PostgreSQL)
+psycopg2-binary>=2.9
+
+# أداة النشر فقط (تطوير/سيرفر)
+paramiko>=3.0

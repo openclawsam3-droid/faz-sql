@@ -1,0 +1,14 @@
+﻿# أسرار
+.env
+*.session
+# بايثون
+__pycache__/
+*.pyc
+venv/
+.venv/
+# بيانات
+*.db
+*.db-journal
+data/
+# سجلات
+*.log
