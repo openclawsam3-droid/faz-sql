@@ -400,6 +400,30 @@ def parse_property_type(query):
     return None
 
 
+# جذور عامية تغطي صيغ الجمع المعرّفة مثل "العماير/العمائر/الفلل/الاراضي"
+_INFER_STEMS = {
+    "عمارة": ("عمار", "عمائ", "عماي", "بناي", "ابني"),
+    "شقة": ("شقق", "شقاق", "شقه", "شقة", "روف", "ملحق", "دوبل", "ستوديو"),
+    "فيلا": ("فيلا", "فلل", "فله", "فلة", "قصر", "قصور"),
+    "أرض": ("أرض", "ارض", "اراضي", "أراضي", "بلك", "صك", "قطعه", "قطعة"),
+    "محل": ("محل", "معرض", "مخزن", "مستودع"),
+    "مكتب": ("مكتب", "عياد"),
+    "استراحة": ("استراح", "شاليه"),
+}
+
+
+def infer_property_type(query):
+    """استخراج النوع المطلوب مع احتمال الجمع المعرّف (العماير) — يعود على parse أولاً ثم الجذور"""
+    p = parse_property_type(query)
+    if p:
+        return p
+    q = _norm_ar(normalize_nums(query))
+    for prop in ["أرض", "عمارة", "شقة", "فيلا", "محل", "مكتب", "استراحة"]:
+        if any(s in q for s in _INFER_STEMS[prop]):
+            return prop
+    return None
+
+
 _DEAL_KEYWORDS = {
     "تمليك": ("تمليك", "تملك", "للبيع", "شراء", "بيع", "امتلاك"),
     "ايجار": ("ايجار", "إيجار", "للإيجار", "بالايجار", "أجار", "اجار", "استئجار"),
@@ -579,6 +603,28 @@ def listing_stats():
     except Exception as e:
         print(f"stats err: {e}", flush=True)
         return 0, ""
+
+
+def count_listings(property_type=None, deal=None):
+    """عدّ العروض النشطة حسب نوع/تعامل — يعتمد على التصنيف الحقيقي لا تطابق النص"""
+    try:
+        conn = get_sorted_conn()
+        where = ["listing_type='عرض'", "status='نشط'"]
+        params = []
+        if property_type:
+            where.append("property_type=%s")
+            params.append(property_type)
+        if deal:
+            _dd = {"تمليك": "شراء"}.get(deal, deal)
+            where.append("(deal_type=%s OR deal_type=%s)")
+            params.extend([_dd, deal])
+        sql = "SELECT COUNT(*) FROM sorted_listings WHERE " + " AND ".join(where)
+        row = conn.execute(sql, params).fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        print(f"count err: {e}", flush=True)
+        return 0
 
 
 # ──────────────────────────────────────────────
@@ -1171,18 +1217,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal = parse_deal_type(r["content"])
     save_user_filters(uid, ptype=ptype, deal=deal, budget=budget)
 
-    # ── سؤال عدّ: "كم عرض عندكم" / "كم عدد الشقق" → إجابة مباشرة بالإحصاءات ──
-    if _re.search(r"(كم\s+(عرض|عروض|عدد)|عدد\s+(العروض|الشقق|الفلل|الأراضي)|عندكم\s+\d|عندك\s+\d)", user_message):
-        filters = {}
-        if ptype:
-            filters["property_type"] = ptype
-        if deal:
-            filters["deal_type"] = deal
-        if budget:
-            filters["max_price"] = budget
-        results = rag_search(user_message, k=200, filters=filters or None)
+# ── سؤال عدّ: "كم عرض عندكم" / "كم عدد الشقق" → إجابة مباشرة بالإحصاءات ──
+    if _re.search(r"(كم\s+(عرض|عروض|عدد)|عدد\s+(العروض|الشقق|الفلل|الأراضي|العماير|العمائر|أعمار|فلل)|عندكم\s+\d|عندك\s+\d)", user_message):
         total, breakdown = listing_stats()
-        n = len(results)
+        # نوع محدد من الرسالة (يدعم جمع معرّف: العماير/العمائر/الفلل)
+        q = _norm_ar(normalize_nums(user_message))
+        p = infer_property_type(q) or ptype
+        n = count_listings(property_type=p, deal=deal) if p else total
+        # إن طلب منطقة محددة من جدة → عدّ فعلياً ضمنها
+        _hint2 = area_hint(user_message)
+        _area2 = next((h for h in _hint2 if "جدة" in h), None)
+        if _area2:
+            _all2 = rag_all()
+            _cnt2 = sum(1 for d in _all2
+                        if (not p or (d.get("property_type") or "") == p)
+                        and match_area(d.get("district"), _area2))
+            if _cnt2:
+                n = _cnt2
         if n:
             reply = f"عندنا حالياً {n} عرض مطابق لطلبك.\n\n{breakdown}\n\nتبي أشوفلك القائمة كاملة؟"
         else:
