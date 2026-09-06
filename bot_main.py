@@ -50,7 +50,7 @@ from reply_bot import (
     logger,
     start,
 )
-from pull_now import pull
+from pull_now import pull_all_async
 from classify_all import analyze_batch
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -96,12 +96,9 @@ def _notify_admin(text):
 
 
 def _run_cycle():
-    """دورة كاملة: سحب القناة ← تصنيف الجديد ← ملخص."""
-    print("[sync] بدء دورة السحب والتصنيف...", flush=True)
-    try:
-        pull()
-    except Exception as e:
-        print(f"[sync] خطأ في السحب: {e}", flush=True)
+    """دورة /cron و /sync: تصنيف فقط بلا Telethon (المراقب اللحظي هو من يسحب
+    ويعوّض الفجوات من داخل حلقة عميله — يسحب جانبياً من هذه الخيوط لمنع تعارض الحلقات)."""
+    print("[sync] بدء دورة التصنيف (السحب يتم من المراقب)...", flush=True)
     try:
         analyze_batch(limit=200, sleep_sec=0.5)
     except Exception as e:
@@ -240,6 +237,21 @@ async def _handle_new_message(event, allowed_urls):
         print(f"[watcher] خطأ حفظ/تصنيف {msg.id}: {e}", flush=True)
 
 
+async def _run_classify_now():
+    await asyncio.to_thread(analyze_batch, 200, 0.5)
+
+
+async def _periodic_backfill():
+    """تعويض دوري للفجوات (فترات نوم/انقطاع) — من نفس حلقة عميل Telethon."""
+    while True:
+        await asyncio.sleep(600)
+        try:
+            await pull_all_async()
+            await _run_classify_now()
+        except Exception as e:
+            print(f"[watcher] فشل التعويض الدوري: {e}", flush=True)
+
+
 async def _watcher_main():
     from telethon import events
     from database import get_raw_conn
@@ -250,12 +262,18 @@ async def _watcher_main():
             client = await ensure_authorized()
 
             urls = [r["url"] for r in get_raw_conn().execute("SELECT url FROM channels").fetchall()]
+
+            # تعويض أي فجوة تُركت أثناء النوم/الانقطاع قبل بدء اللحظي
+            await pull_all_async()
+            await _run_classify_now()
+
             logger.info(f"المراقب اللحظي جاهز — قنوات: {urls}")
 
             async def handler(event):
                 await _handle_new_message(event, urls)
 
             client.add_event_handler(handler, events.NewMessage())
+            asyncio.get_running_loop().create_task(_periodic_backfill())
             await client.run_until_disconnected()
         except Exception as e:
             from telegram_agent import SessionNeedsLogin
