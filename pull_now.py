@@ -15,20 +15,23 @@ from database import get_raw_conn, init_db
 from spam_filter import is_spam
 
 
-def pull():
+async def pull_all_async():
+    """نواة السحب غير المتزامنة — تحفظ كل جديد منذ last_message_id لكل قناة.
+    تُستدعى من نفس حلقة المراقب اللحظي (نفس عميل Telethon) لمنع تعارض الحلقات."""
     init_db()
     conn = get_raw_conn()
 
     channels = conn.execute("SELECT url, last_message_id FROM channels").fetchall()
     if not channels:
         print("لا توجد قنوات — أضف قناة في جدول channels", flush=True)
+        conn.close()
         return
 
     for ch in channels:
         url = ch["url"]
         last_id = ch["last_message_id"] or 0
 
-        result = asyncio.run(pull_messages(url, months_back=5, min_id=last_id))
+        result = await pull_messages(url, months_back=5, min_id=last_id)
         if "error" in result:
             print(f"خطأ سحب من {url}: {result['error']}", flush=True)
             continue
@@ -76,6 +79,10 @@ def pull():
     clean = conn.execute("SELECT COUNT(*) FROM raw_messages WHERE is_spam=0").fetchone()[0]
     conn.close()
     print(f"إجمالي الخام: {total} | صالح: {clean}", flush=True)
+
+
+def pull():
+    asyncio.run(pull_all_async())
 
 
 if __name__ == "__main__":
