@@ -188,7 +188,14 @@ def _run_bot_thread():
         )
         logger.info(f"مجدد التصنيف يعمل كل {PULL_INTERVAL_H:g} ساعات.")
 
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    async def _poll():
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("البوت جاهز (polling).")
+        await asyncio.Event().wait()
+
+    asyncio.run(_poll())
 
 
 # ── خيط المراقب اللحظي ──
