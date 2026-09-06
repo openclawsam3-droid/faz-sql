@@ -99,6 +99,10 @@ class PGConnection:
         except Exception:
             pass
 
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
     def fetchall(self):
         rows = self._cur.fetchall()
         cols = [d[0] for d in (self._cur.description or [])]
