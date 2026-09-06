@@ -457,6 +457,109 @@ def parse_district(query):
 
 
 # ──────────────────────────────────────────────
+#  خريطة مناطق جدة (شمال/وسط/شرق/جنوب) ومكة والرياض
+#  — تُستخدم لتصفية وبوّابة أفضليات المرشحين قبل النموذج
+# ──────────────────────────────────────────────
+JEDDAH_AREAS = {
+    "شمال جدة": {
+        "أبحر الشمالية", "أبحر الجنوبية", "ابحر", "بحر", "الشاطئ", "المرجان", "البساتين",
+        "المحمدية", "النعيم", "النهضة", "الزهراء", "السلامة", "الروضة", "الخالدية",
+        "الأصالة", "الياقوت", "اللؤلؤ", "الشراع", "الأمواج", "الصواري", "الزمرد",
+        "الفنار", "المنارات", "البحيرات", "طيبة", "الرحيلي", "خليج سلمان", "ذهبان",
+        "الشاطئ الذهبي", "درة العروس", "جوهرة العروس",
+    },
+    "وسط جدة": {
+        "الحمراء", "الأندلس", "الرويس", "الشرفية", "مشرفة", "العزيزية", "الرحاب",
+        "بني مالك", "النسيم", "الورود", "السليمانية", "الفيحاء", "البلد", "البغدادية",
+        "الكندرة", "الصحيفة", "العمارية", "الهنداوية", "السبيل", "النزهة", "المروة",
+        "الربوة", "البوادي", "الصفا", "الفيصلية", "وسط جدة",
+    },
+    "شرق جدة": {
+        "الحمدانية", "الصالحية", "الفلاح", "الرحمانية", "الفروسية", "الرياض", "الوفاء",
+        "السامر", "الأجواد", "المنار", "الواحة", "بريمان", "التوفيق", "مريخ", "النخيل",
+        "الرغامة", "الحرازات", "أم السلم", "المنتزهات", "الريان", "الصفوة", "درب الحرمين",
+    },
+    "جنوب جدة": {
+        "الجامعة", "الثغر", "الروابي", "النزلة", "مدائن الفهد", "القريات", "غليل",
+        "بترومين", "المحجر", "الوزيرية", "الجوهرة", "السنابل", "الأجاويد", "الأمير فواز",
+        "الأمير عبدالمجيد", "الخمرة", "الفضيلة", "القرينية", "القوزين", "المليساء",
+        "العدل", "الحسينية", "السلامة 2", "التيسير", "الفضيل", "الفضل",
+    },
+}
+
+MAKKAH_ATTRACTIONS = {
+    "التخصصي", "الزايدي", "الخالدية", "جبل عمر", "العزيزية", "الجميزة", "الملك فهد",
+}
+RIYADH_DISTRICTS = {
+    "الرحاب", "السرورية", "الصفا", "النزهة", "النهضة", "الريان", "ضاحية الجوهرة",
+    "مخطط الرياض", "الملقا", "النسيم", "الخليج", "النرجس", "الرياض",
+}
+
+_AREA_CACHE = None
+
+
+def _area_map():
+    """قائمة (اسم المنطقة، كلماتها المبدئية) — تُبنى مرة واحدة"""
+    global _AREA_CACHE
+    if _AREA_CACHE is None:
+        import re as _re
+        pairs = []
+        for area, names in list(JEDDAH_AREAS.items()) + [("مكة", MAKKAH_ATTRACTIONS), ("الرياض", RIYADH_DISTRICTS)]:
+            pairs.append((area, [_norm_ar(x) for x in names]))
+        _AREA_CACHE = [(_re.compile(r"(^|\s)" + _re.escape(x) + r"($|\s)"), area)
+                       for area, names in pairs for x in names]
+    return _AREA_CACHE
+
+
+def match_area(district, area):
+    """هل حي معيّن يقع ضمن منطقة (مثلاً شمال جدة)؟"""
+    d = _norm_ar(str(district or ""))
+    if not d:
+        return area == "شمال جدة" and False
+    keywords = dict(list(JEDDAH_AREAS.items()) + [("مكة", MAKKAH_ATTRACTIONS), ("الرياض", RIYADH_DISTRICTS)])
+    for kw in keywords.get(area, ()):
+        if _norm_ar(kw) in d:
+            return True
+    return False
+
+
+def area_hint(query):
+    """استخراج منطقة (شمال/وسط/شرق/جنوب جدة، مكة، الرياض) من كلام العميل أو None"""
+    import re as _re
+    q = _norm_ar(normalize_nums(query))
+    hints = []
+    _AREA_DIR = {"شمال": "شمال جدة", "وسط": "وسط جدة", "جنوب": "جنوب جدة", "شرق": "شرق جدة",
+                 "غرب": "غرب جدة"}
+    # أنماط صريحة: "شمال جدة", "جنوب المدينة", "وسط جدة", "شمال الرياض"
+    for pat, area in [
+        (r"شمال\s+([^\s]+)", None), (r"جنوب\s+([^\s]+)", None),
+        (r"وسط\s+([^\s]+)", None), (r"شرق\s+([^\s]+)", None),
+        (r"غرب\s+([^\s]+)", None),
+    ]:
+        m = _re.search(pat, q)
+        if m:
+            direction, city = m.group(0).split()[0], m.group(1)
+            if "جده" in city:
+                hints.append(_AREA_DIR.get(direction) or direction)
+            elif "مكه" in city:
+                hints.append("مكة")
+            elif "رياض" in city:
+                hints.append("الرياض")
+    if "مكه" in q or "مكة" in q:
+        hints.append("مكة")
+    if "الرياض" in q or "رياض" in q:
+        hints.append("الرياض")
+    return list(dict.fromkeys(hints))
+
+
+def prioritize_by_area(docs, area):
+    """إعادة ترتيب المرشحين: أحياء المنطقة المطلوبة تتصدر، ثم الباقي حسب ترتيبه"""
+    in_area = [d for d in docs if match_area(d.get("district"), area)]
+    rest = [d for d in docs if d not in in_area]
+    return in_area + rest
+
+
+# ──────────────────────────────────────────────
 #  إحصاءات حقيقية من المفروز
 # ──────────────────────────────────────────────
 def listing_stats():
@@ -1208,6 +1311,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         candidates = [d for d in candidates if (d.get("deal_type") or "") == _dd or (d.get("deal_type") or "") == kdeal]
     if not candidates:
         candidates = all_docs
+
+    # أولوية النطاق الجغرافي: "شمال جدة" → أحياء شمال جدة تتصدر المرشحين أولاً
+    _hint = area_hint(user_message)
+    if _hint:
+        _area = next((h for h in _hint if "جدة" in h), None)
+        if _area and candidates:
+            candidates = prioritize_by_area(candidates, _area)
+
     candidates = list(candidates)[:18]
 
     # إثراء كل مرشح بالنص الأصلي (مختصر) ليطابق النموذج الصياغة الحرفية للإعلان — دفعة واحدة
