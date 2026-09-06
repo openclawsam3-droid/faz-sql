@@ -182,25 +182,35 @@ def contact_reply(doc, num):
 _RAW_CACHE = {}
 
 
+def get_raw_texts(raw_ids):
+    """جلب نصوص خام متعددة بذهاب واحد للقاعدة (بدل اتصال لكل معرّف)."""
+    ids = [i for i in (raw_ids or []) if i is not None]
+    if not ids:
+        return {}
+    missing = [i for i in ids if i not in _RAW_CACHE]
+    if missing:
+        try:
+            from database import get_raw_conn
+            conn = get_raw_conn()
+            rows = conn.execute(
+                "SELECT id, raw_text FROM raw_messages WHERE id IN (%s)"
+                % ",".join(["?"] * len(missing)),
+                tuple(missing),
+            ).fetchall()
+            conn.close()
+            for r in rows:
+                _RAW_CACHE[r["id"]] = r["raw_text"] or ""
+        except Exception as e:
+            print(f"raw batch fetch err: {e}", flush=True)
+    return {i: _RAW_CACHE.get(i, "") for i in ids}
+
+
 def get_raw_text(raw_id):
     """جلب النص الخام للعرض من قاعدة الخام (بالـ raw_id)"""
     if raw_id is None:
         return ""
-    if raw_id in _RAW_CACHE:
-        return _RAW_CACHE[raw_id]
-    try:
-        from database import get_raw_conn
-        conn = get_raw_conn()
-        row = conn.execute(
-            "SELECT raw_text FROM raw_messages WHERE id=?", (raw_id,)
-        ).fetchone()
-        conn.close()
-        text = row["raw_text"] if row else ""
-        _RAW_CACHE[raw_id] = text
-        return text
-    except Exception as e:
-        print(f"raw fetch err: {e}", flush=True)
-        return ""
+    got = get_raw_texts([raw_id])
+    return got.get(raw_id, "")
 
 
 def extract_phone(text):
@@ -1198,15 +1208,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         candidates = [d for d in candidates if (d.get("deal_type") or "") == _dd or (d.get("deal_type") or "") == kdeal]
     if not candidates:
         candidates = all_docs
-    candidates = list(candidates)[:40]
+    candidates = list(candidates)[:18]
 
-    # إثراء كل مرشح بالنص الأصلي (مختصر) ليطابق النموذج الصياغة الحرفية للإعلان
+    # إثراء كل مرشح بالنص الأصلي (مختصر) ليطابق النموذج الصياغة الحرفية للإعلان — دفعة واحدة
+    _raws = get_raw_texts([d.get("raw_id") for d in candidates])
     for _i, _d in enumerate(candidates):
         if not isinstance(_d, dict):
             _d = dict(_d)
             candidates[_i] = _d
         if not _d.get("raw_text"):
-            _rt = get_raw_text(_d.get("raw_id"))
+            _rt = _raws.get(_d.get("raw_id"))
             if _rt:
                 _d["raw_text"] = _rt[:200]
 
