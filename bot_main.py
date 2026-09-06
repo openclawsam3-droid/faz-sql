@@ -123,6 +123,11 @@ def _spawn_thread(fn):
 
 
 # ── نقط HTTP (Flask في الخيط الرئيسي) ──
+@web_app.route("/")
+def index():
+    return jsonify({"status": "ok", "service": "fadh-akariya-bot"})
+
+
 @web_app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "fadh-akariya-bot",
@@ -183,8 +188,7 @@ def _run_bot_thread():
         )
         logger.info(f"مجدد التصنيف يعمل كل {PULL_INTERVAL_H:g} ساعات.")
 
-    app.run_polling(allowed_updates=Update.ALL_TYPES,
-                    ready_callback=lambda _: logger.info("البوت جاهز (polling)."))
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 # ── خيط المراقب اللحظي ──
